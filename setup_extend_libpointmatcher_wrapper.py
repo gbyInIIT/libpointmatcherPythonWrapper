@@ -1,0 +1,42 @@
+from distutils.core import setup, Extension
+
+module1 = Extension('libpointmatcherPythonWrapper',
+                    define_macros=[('MAJOR_VERSION', '1'),
+                                   ('MINOR_VERSION', '0')],
+                    include_dirs=['/usr/include/vtk-5.8',
+                                  '/usr/include/pcl-1.7',
+                                  '/usr/include/eigen3',
+                                  '/usr/include/ni',
+                                  '/usr/include/openni2'],
+                    libraries=['boost_program_options', 'gsl', 'gslcblas', 'boost_system', 'boost_filesystem',
+                               'boost_thread', 'boost_date_time', 'boost_iostreams', 'boost_serialization',
+                               'boost_chrono', 'pthread', 'pcl_common', 'flann_cpp_s', 'pcl_kdtree', 'pcl_octree',
+                               'pcl_search', 'qhull', 'pcl_surface', 'pcl_sample_consensus', 'OpenNI', 'OpenNI2',
+                               'pcl_io','pcl_filters', 'pcl_features', 'pcl_keypoints', 'pcl_registration',
+                               'pcl_segmentation', 'pcl_recognition', 'pcl_visualization', 'pcl_people',
+                               'pcl_outofcore', 'pcl_tracking', 'pcl_apps', 'dl'],
+                    library_dirs=['/usr/local/lib'],
+                    # extra_compile_args=['-std=c99', '-fopenmp'],
+                    extra_compile_args=['-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION'],
+                    sources=['libpointmatcherPythonWrapper.cpp'],
+                    extra_link_args=['/usr/lib/libvtkCommon.so.5.8.0',
+                                     '/usr/lib/libvtkFiltering.so.5.8.0', '/usr/lib/libvtkImaging.so.5.8.0',
+                                     '/usr/lib/libvtkGraphics.so.5.8.0', '/usr/lib/libvtkGenericFiltering.so.5.8.0',
+                                     '/usr/lib/libvtkIO.so.5.8.0', '/usr/lib/libvtkRendering.so.5.8.0',
+                                     '/usr/lib/libvtkVolumeRendering.so.5.8.0',
+                                     '/usr/lib/libvtkHybrid.so.5.8.0', '/usr/lib/libvtkWidgets.so.5.8.0',
+                                     '/usr/lib/libvtkParallel.so.5.8.0', '/usr/lib/libvtkInfovis.so.5.8.0',
+                                     '/usr/lib/libvtkGeovis.so.5.8.0', '/usr/lib/libvtkViews.so.5.8.0',
+                                     '/usr/lib/libvtkCharts.so.5.8.0', '/usr/local/lib/libpointmatcher.so',
+                                     '/usr/local/lib/libnabo.a'])
+
+setup(name='gby aligns point cloud with libpointmatcher and pcl',
+      version='1.0',
+      description='working with libpointmatcher and pcl',
+      author='GAO Boyang',
+      author_email='gaoboyang@gmail.com',
+      url='http://docs.python.org/extending/building',
+      long_description='''
+This is really just a demo package.
+''',
+      ext_modules=[module1])
