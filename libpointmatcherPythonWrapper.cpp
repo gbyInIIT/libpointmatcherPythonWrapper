@@ -29,6 +29,9 @@
 #include <pcl/filters/statistical_outlier_removal.h>
 #include "pointmatcher/PointMatcher.h"
 
+#define __IN
+#define __OUT
+
 using namespace std;
 
 typedef pcl::PointXYZ PointT;
@@ -113,7 +116,7 @@ keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event,
         bool debug = true;
 }
 
-PointCloudT::Ptr pipline_cloud_remove_out_liers(PointCloudT::Ptr cloud) {
+PointCloudT::Ptr pipeline_cloud_remove_out_liers(PointCloudT::Ptr cloud) {
     PointCloudT::Ptr cloud_filtered (new PointCloudT);
     pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
     sor.setInputCloud (cloud);
@@ -123,7 +126,7 @@ PointCloudT::Ptr pipline_cloud_remove_out_liers(PointCloudT::Ptr cloud) {
     return cloud_filtered;
 }
 
-PointCloudT::Ptr pipline_cloud_down_sampling(PointCloudT::Ptr cloud, const float voxel_grid_size = 0.05f) {
+PointCloudT::Ptr pipeline_cloud_down_sampling(PointCloudT::Ptr cloud, const float voxel_grid_size = 0.05f) {
     // ... and downsampling the point scene_cloud
     pcl::VoxelGrid<pcl::PointXYZ> vox_grid;
     vox_grid.setInputCloud(cloud);
@@ -168,6 +171,7 @@ void config_icp_general(PM::ICP & icp, int isForce2D = 0, int isPointToPlane = 1
 
     icp.readingDataPointsFilters.push_back(identityDataPointsFilter);
     icp.referenceDataPointsFilters.push_back(surfaceNormalDataPointsFilter);
+//    icp.referenceDataPointsFilters.push_back(identityDataPointsFilter);
 
     PM::OutlierFilter* trimmedDistOutlierFilter = PM::get().OutlierFilterRegistrar.create("TrimmedDistOutlierFilter");
     icp.outlierFilters.push_back(trimmedDistOutlierFilter);
@@ -204,6 +208,7 @@ void config_icp_general(PM::ICP & icp, int isForce2D = 0, int isPointToPlane = 1
     icp.inspector.reset(nullInspector);
 //    icp.inspector.reset(performaceInspector);
     params.clear();
+    printf("ICP generally configured.\n");
 }
 void config_icp(PM::ICP & icp, int isForce2D = 0, int isPointToPlane = 1) {
     PointMatcherSupport::Parametrizable::Parameters params;
@@ -271,7 +276,7 @@ void config_icp(PM::ICP & icp, int isForce2D = 0, int isPointToPlane = 1) {
     params["baseFileName"] = "performace_stat";
     params["dumpPerfOnExit"] = "1";
     params["dumpStats"] = "1";
-    PM::Inspector* performaceInspector = PM::get().InspectorRegistrar.create("PerformanceInspector", params);
+//    PM::Inspector* performaceInspector = PM::get().InspectorRegistrar.create("PerformanceInspector", params);
     icp.inspector.reset(nullInspector);
 //    icp.inspector.reset(performaceInspector);
     params.clear();
@@ -345,11 +350,25 @@ void visualize_pcl_point_clouds(PointCloudT::Ptr cloud_slc_template,
 
 }
 
-static PyObject * alignTemplateWithSceneICP(PyObject* self, PyObject*args) {
-    PyObject * py_obj_ptr_scene_cloud = NULL, * py_obj_ptr_init_translation=NULL;
+void convert_py_array_to_pcl_cloud(__IN int n_point, __IN PyArrayObject * py_array_ptr_cloud, __OUT PointCloudT::Ptr pcl_cloud) {
+    for (int i = 0; i < n_point; i++) {
+        float * float_ptr_x = (float*) PyArray_GETPTR2(py_array_ptr_cloud, i, 0);
+        float * float_ptr_y = (float*) PyArray_GETPTR2(py_array_ptr_cloud, i, 1);
+        float * float_prt_z = (float*) PyArray_GETPTR2(py_array_ptr_cloud, i, 2);
+        if (isnanf(*float_ptr_x) || isnanf(*float_ptr_y) || isnanf(*float_prt_z))
+            continue;
+        PointT pt = PointT(*float_ptr_x, *float_ptr_y, *float_prt_z);
+        pcl_cloud->push_back(pt);
+    }
+}
+
+static PyObject * displayTwoPointCloud(PyObject* self, PyObject*args) {
+    PyObject * py_obj_ptr_scene_cloud = NULL;
+    PyObject * py_obj_ptr_init_translation=NULL;
     PyObject * py_obj_ptr_template_cloud = NULL;
-    PyArrayObject *py_array_ptr_scene_cloud=NULL, *py_array_ptr_init_translation=NULL;
-    PyArrayObject *py_array_ptr_template_cloud = NULL;
+    PyArrayObject * py_array_ptr_scene_cloud=NULL;
+    PyArrayObject * py_array_ptr_init_translation=NULL;
+    PyArrayObject * py_array_ptr_template_cloud = NULL;
     const char* slc_template_ply_filename_str_ptr;
     const char* scene_pcd_filename_str_prt;
     float template_voxel_dim, scene_voxel_dim;
@@ -376,9 +395,9 @@ static PyObject * alignTemplateWithSceneICP(PyObject* self, PyObject*args) {
     std::string slc_template_ply_filename(slc_template_ply_filename_str_ptr);
     std::string scene_pcd_filename(scene_pcd_filename_str_prt);
 
-    PointCloudT::Ptr cloud_slc_template(new PointCloudT);  // Original point cloud
-    PointCloudT::Ptr cloud_scene_aligned(new PointCloudT);  // Transformed point cloud
-    PointCloudT::Ptr cloud_scene_not_aligned(new PointCloudT);  // ICP output point cloud
+    PointCloudT::Ptr pcl_cloud_slc_template(new PointCloudT);  // Original point cloud
+    PointCloudT::Ptr pcl_cloud_scene_aligned(new PointCloudT);  // Transformed point cloud
+    PointCloudT::Ptr pcl_cloud_scene_not_aligned(new PointCloudT);  // ICP output point cloud
 
     cout << "Setting up pointclouds..." << endl;
     pcl::console::TicToc time;
@@ -387,19 +406,12 @@ static PyObject * alignTemplateWithSceneICP(PyObject* self, PyObject*args) {
     // init data for tamplate and scene
     printf("shape of the template array: \n");
     npy_intp * array_dim_ptr_template_cloud = PyArray_DIMS(py_array_ptr_template_cloud);
-//    for (int i = 0; i < py_array_ptr_template_cloud->nd; i++) {
     for (int i = 0; i < PyArray_NDIM(py_array_ptr_template_cloud); i++) {
         printf ("%ld ", array_dim_ptr_template_cloud[i]);
     }
     printf("\n");
     int n_point_in_template_cloud = array_dim_ptr_template_cloud[0];
-    for (int i = 0; i < n_point_in_template_cloud; i++) {
-        float * float_ptr_x = (float*) PyArray_GETPTR2(py_array_ptr_template_cloud, i, 0);
-        float * float_ptr_y = (float*) PyArray_GETPTR2(py_array_ptr_template_cloud, i, 1);
-        float * float_prt_z = (float*) PyArray_GETPTR2(py_array_ptr_template_cloud, i, 2);
-        PointT pt = PointT(*float_ptr_x, *float_ptr_y, *float_prt_z);
-        cloud_slc_template->push_back(pt);
-    }
+    convert_py_array_to_pcl_cloud(n_point_in_template_cloud, py_array_ptr_template_cloud, pcl_cloud_slc_template);
     printf("shape of the scene array: \n");
     npy_intp * array_dim_ptr_scene_cloud = PyArray_DIMS(py_array_ptr_scene_cloud);
     for (int i = 0; i < PyArray_NDIM(py_array_ptr_scene_cloud); i++) {
@@ -407,51 +419,193 @@ static PyObject * alignTemplateWithSceneICP(PyObject* self, PyObject*args) {
     }
     printf("\n");
     int n_point_in_scene_cloud = array_dim_ptr_scene_cloud[0];
-    for (int i = 0; i < n_point_in_scene_cloud; i++) {
-        float * float_ptr_x = (float*) PyArray_GETPTR2(py_array_ptr_scene_cloud, i, 0);
-        float * float_ptr_y = (float*) PyArray_GETPTR2(py_array_ptr_scene_cloud, i, 1);
-        float * float_prt_z = (float*) PyArray_GETPTR2(py_array_ptr_scene_cloud, i, 2);
-        PointT pt = PointT(*float_ptr_x, *float_ptr_y, *float_prt_z);
-        cloud_scene_not_aligned->push_back(pt);
-    }
+    convert_py_array_to_pcl_cloud(n_point_in_scene_cloud, py_array_ptr_scene_cloud, pcl_cloud_scene_not_aligned);
 
     cout << "Aligning point cloud..." << endl;
-//    cloud_slc_template = pipline_cloud_down_sampling(cloud_slc_template, 0.001f);
-    cloud_slc_template = pipline_cloud_down_sampling(cloud_slc_template, template_voxel_dim);
+    pcl_cloud_slc_template = pipeline_cloud_down_sampling(pcl_cloud_slc_template, template_voxel_dim);
     Eigen::Vector4f template_centroid;
-    pcl::compute3DCentroid(*cloud_slc_template, template_centroid);
+    pcl::compute3DCentroid(*pcl_cloud_slc_template, template_centroid);
 
-    cloud_scene_not_aligned = pipline_cloud_down_sampling(cloud_scene_not_aligned, scene_voxel_dim);
+    pcl_cloud_scene_not_aligned = pipeline_cloud_down_sampling(pcl_cloud_scene_not_aligned, scene_voxel_dim);
     if (n_point_in_scene_cloud > 1000) {
-        cloud_scene_not_aligned = pipline_cloud_remove_out_liers(cloud_scene_not_aligned);
+        pcl_cloud_scene_not_aligned = pipeline_cloud_remove_out_liers(pcl_cloud_scene_not_aligned);
     }
     Eigen::Vector4f scene_centroid;
-    pcl::compute3DCentroid(*cloud_scene_not_aligned, scene_centroid);
+    pcl::compute3DCentroid(*pcl_cloud_scene_not_aligned, scene_centroid);
 
     Eigen::Vector4f scene_to_template_translation = scene_centroid - template_centroid;
     scene_to_template_translation(3) = 1.f;
     Eigen::Matrix4f init_scene_transformation = Eigen::Matrix4f::Identity();
     init_scene_transformation.col(3) = scene_to_template_translation;
-//    pcl::transformPointCloud(*cloud_scene_not_aligned, *cloud_scene_not_aligned, Eigen::Matrix4f(init_scene_transformation.inverse()));
+//    pcl::transformPointCloud(*pcl_cloud_scene_not_aligned, *pcl_cloud_scene_not_aligned, Eigen::Matrix4f(init_scene_transformation.inverse()));
 
-    DP * ref_ptr = pcl_cloud_to_pm_DataPoints(cloud_slc_template);
-    DP * data_ptr = pcl_cloud_to_pm_DataPoints(cloud_scene_not_aligned);
-    const DP & ref = *ref_ptr;
-    const DP & data = *data_ptr;
+    DP * pm_ref_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_slc_template);
+    DP * pm_data_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_scene_not_aligned);
+    const DP & ref = *pm_ref_ptr;
+    const DP & data = *pm_data_ptr;
 
     // Create the default ICP algorithm
     PM::ICP icp;
 
     // See the implementation of setDefault() to create a custom ICP algorithm
 //    icp.setDefault();
-    config_icp(icp, isForce2D, isPointToPlane);
+//    config_icp(icp, isForce2D, isPointToPlane);
+    config_icp_general(icp, isForce2D, isPointToPlane);
+
+
+    // Compute the transformation to express data in ref
+//    PM::TransformationParameters T = icp(data, ref);
+    PM::TransformationParameters T = init_scene_transformation;//icp(data, ref, init_scene_transformation.inverse());
+//    icp.inspector->dumpStats(std::cout);
+    PM::TransformationParameters Tinverse = T.inverse();
+//    Eigen::Matrix4f scene_to_iiwa = Eigen::Matrix4f::Identity();
+//    double theta = M_PI_2;  // The angle of rotation in radians
+//    scene_to_iiwa(0, 0) = cos(theta);
+//    scene_to_iiwa(0, 1) = -sin(theta);
+//    scene_to_iiwa(1, 0) = sin(theta);
+//    scene_to_iiwa(1, 1) = cos(theta);
+
+    std::cout << "\nalignment in " << time.toc() << " ms\n" << endl;
+    cout << "template to data transformation:" << endl << Tinverse << endl;
+
+    if (isDebug == 1) {
+        // Transform data to express it in ref
+        DP data_out(data);
+        DP data_in(data);
+        icp.transformations.apply(data_out, T);
+        icp.transformations.apply(data_in, init_scene_transformation.inverse());
+
+        // Safe files to see the results
+        //    ref.save("test_ref.vtk");
+        PointCloudT::Ptr pcl_ref_cloud_ptr = pm_DataPoints_to_pcl_cloud(ref);
+        //    data.save("test_data_in.vtk");
+        PointCloudT::Ptr pcl_data_in_cloud_ptr = pm_DataPoints_to_pcl_cloud(data_in);
+        //    data_out.save("test_data_out.vtk");
+        PointCloudT::Ptr pcl_data_out_cloud_ptr = pm_DataPoints_to_pcl_cloud(data_out);
+        visualize_pcl_point_clouds(pcl_ref_cloud_ptr, pcl_data_out_cloud_ptr, pcl_data_in_cloud_ptr, "gby");
+    } else {
+    }
+//    Tinverse = scene_to_iiwa * Tinverse;
+    int dims[2];
+    dims[0] = 5;
+    dims[1] = 4;
+    PyArrayObject * Tout = (PyArrayObject *) PyArray_FromDims(2,dims, NPY_FLOAT32);
+    float * dataOfTout = (float *) PyArray_DATA(Tout);//Tout->data;
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            dataOfTout[i * PyArray_STRIDES(Tout)[0]/sizeof(float) + j] = Tinverse(i, j);
+        }
+    }
+    float overLap = icp.errorMinimizer->getWeightedPointUsedRatio();
+    PM::ErrorMinimizer::ErrorElements errorElements = icp.errorMinimizer->getErrorElements();
+    dataOfTout[4 * PyArray_STRIDES(Tout)[0]/sizeof(float) + 0] = overLap;
+    dataOfTout[4 * PyArray_STRIDES(Tout)[0]/sizeof(float) + 1] = float(errorElements.averagedMatchingDist2);
+    dataOfTout[4 * PyArray_STRIDES(Tout)[0]/sizeof(float) + 2] = float(errorElements.weightedMatchingDist2);
+    dataOfTout[4 * PyArray_STRIDES(Tout)[0]/sizeof(float) + 3] = float(errorElements.matches.dists.cols()); // number of matches (this one is normalized one with pure matches whose weights are non-zero inside)
+
+    return PyArray_Return(Tout);
+//    Py_RETURN_NONE;
+}
+static PyObject * alignTemplateWithSceneICP(PyObject* self, PyObject*args) {
+    PyObject * py_obj_ptr_scene_cloud = NULL;
+    PyObject * py_obj_ptr_init_translation=NULL;
+    PyObject * py_obj_ptr_template_cloud = NULL;
+    PyArrayObject * py_array_ptr_scene_cloud=NULL;
+    PyArrayObject * py_array_ptr_init_translation=NULL;
+    PyArrayObject * py_array_ptr_template_cloud = NULL;
+    const char* slc_template_ply_filename_str_ptr;
+    const char* scene_pcd_filename_str_prt;
+    float template_voxel_dim, scene_voxel_dim;
+    int isForce2D, isPointToPlane, isDebug;
+    if (!PyArg_ParseTuple(args,
+                          "ssOOOffiii",
+                          &slc_template_ply_filename_str_ptr,
+                          &scene_pcd_filename_str_prt,
+                          &py_obj_ptr_scene_cloud,
+                          &py_obj_ptr_init_translation,
+                          &py_obj_ptr_template_cloud,
+                          &template_voxel_dim,
+                          &scene_voxel_dim,
+                          &isForce2D,
+                          &isPointToPlane,
+                          &isDebug))
+        return NULL;
+    py_array_ptr_scene_cloud = (PyArrayObject *)PyArray_FROM_OTF(py_obj_ptr_scene_cloud, NPY_FLOAT32, NPY_ARRAY_IN_ARRAY);
+    if (py_array_ptr_scene_cloud == NULL) return NULL;
+    py_array_ptr_init_translation = (PyArrayObject *)PyArray_FROM_OTF(py_obj_ptr_init_translation, NPY_FLOAT32, NPY_ARRAY_IN_ARRAY);
+    if (py_array_ptr_init_translation == NULL) return NULL;
+    py_array_ptr_template_cloud = (PyArrayObject *)PyArray_FROM_OTF(py_obj_ptr_template_cloud, NPY_FLOAT32, NPY_ARRAY_IN_ARRAY);
+    if (py_array_ptr_template_cloud == NULL) return NULL;
+    std::string slc_template_ply_filename(slc_template_ply_filename_str_ptr);
+    std::string scene_pcd_filename(scene_pcd_filename_str_prt);
+
+    PointCloudT::Ptr pcl_cloud_slc_template(new PointCloudT);  // Original point cloud
+    PointCloudT::Ptr pcl_cloud_scene_aligned(new PointCloudT);  // Transformed point cloud
+    PointCloudT::Ptr pcl_cloud_scene_not_aligned(new PointCloudT);  // ICP output point cloud
+
+    cout << "Setting up pointclouds..." << endl;
+    pcl::console::TicToc time;
+    time.tic();
+
+    // init data for tamplate and scene
+    printf("shape of the template array: \n");
+    npy_intp * array_dim_ptr_template_cloud = PyArray_DIMS(py_array_ptr_template_cloud);
+    for (int i = 0; i < PyArray_NDIM(py_array_ptr_template_cloud); i++) {
+        printf ("%ld ", array_dim_ptr_template_cloud[i]);
+    }
+    printf("\n");
+    int n_point_in_template_cloud = array_dim_ptr_template_cloud[0];
+    convert_py_array_to_pcl_cloud(n_point_in_template_cloud, py_array_ptr_template_cloud, pcl_cloud_slc_template); // _in, _in, _out
+    printf("Template non nan point: %d\n", pcl_cloud_slc_template->size());
+
+    printf("shape of the scene array: \n");
+    npy_intp * array_dim_ptr_scene_cloud = PyArray_DIMS(py_array_ptr_scene_cloud);
+    for (int i = 0; i < PyArray_NDIM(py_array_ptr_scene_cloud); i++) {
+        printf ("%ld ", array_dim_ptr_scene_cloud[i]);
+    }
+    printf("\n");
+    int n_point_in_scene_cloud = array_dim_ptr_scene_cloud[0];
+    convert_py_array_to_pcl_cloud(n_point_in_scene_cloud, py_array_ptr_scene_cloud, pcl_cloud_scene_not_aligned);
+    printf("Scene non nan point: %d\n", pcl_cloud_scene_not_aligned->size());
+
+    cout << "Aligning point cloud..." << endl;
+    pcl_cloud_slc_template = pipeline_cloud_down_sampling(pcl_cloud_slc_template, template_voxel_dim);
+    Eigen::Vector4f template_centroid;
+    pcl::compute3DCentroid(*pcl_cloud_slc_template, template_centroid);
+
+    pcl_cloud_scene_not_aligned = pipeline_cloud_down_sampling(pcl_cloud_scene_not_aligned, scene_voxel_dim);
+    if (n_point_in_scene_cloud > 1000) {
+        pcl_cloud_scene_not_aligned = pipeline_cloud_remove_out_liers(pcl_cloud_scene_not_aligned);
+    }
+    Eigen::Vector4f scene_centroid;
+    pcl::compute3DCentroid(*pcl_cloud_scene_not_aligned, scene_centroid);
+
+    Eigen::Vector4f scene_to_template_translation = scene_centroid - template_centroid;
+    scene_to_template_translation(3) = 1.f;
+    Eigen::Matrix4f init_scene_transformation = Eigen::Matrix4f::Identity();
+    init_scene_transformation.col(3) = scene_to_template_translation;
+//    pcl::transformPointCloud(*pcl_cloud_scene_not_aligned, *pcl_cloud_scene_not_aligned, Eigen::Matrix4f(init_scene_transformation.inverse()));
+
+    DP * pm_ref_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_slc_template);
+    DP * pm_data_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_scene_not_aligned);
+    const DP & ref = *pm_ref_ptr;
+    const DP & data = *pm_data_ptr;
+
+    // Create the default ICP algorithm
+    PM::ICP icp;
+
+    // See the implementation of setDefault() to create a custom ICP algorithm
+//    icp.setDefault();
+//    config_icp(icp, isForce2D, isPointToPlane);
+    config_icp_general(icp, isForce2D, isPointToPlane);
+
 
     // Compute the transformation to express data in ref
 //    PM::TransformationParameters T = icp(data, ref);
     PM::TransformationParameters T = icp(data, ref, init_scene_transformation.inverse());
 //    icp.inspector->dumpStats(std::cout);
     PM::TransformationParameters Tinverse = T.inverse();
-    Eigen::Matrix4f scene_to_iiwa = Eigen::Matrix4f::Identity();
+//    Eigen::Matrix4f scene_to_iiwa = Eigen::Matrix4f::Identity();
 //    double theta = M_PI_2;  // The angle of rotation in radians
 //    scene_to_iiwa(0, 0) = cos(theta);
 //    scene_to_iiwa(0, 1) = -sin(theta);
@@ -520,9 +674,9 @@ static PyObject * alignTemplateWithSceneICP2DData(PyObject* self, PyObject*args)
     std::string slc_template_ply_filename(slc_template_ply_filename_str_ptr);
     std::string scene_pcd_filename(scene_pcd_filename_str_prt);
 
-    PointCloudT::Ptr cloud_slc_template(new PointCloudT);  // Original point cloud
+    PointCloudT::Ptr pcl_cloud_slc_template(new PointCloudT);  // Original point cloud
     PointCloudT::Ptr cloud_scene_aligned(new PointCloudT);  // Transformed point cloud
-    PointCloudT::Ptr cloud_scene_not_aligned(new PointCloudT);  // ICP output point cloud
+    PointCloudT::Ptr pcl_cloud_scene_not_aligned(new PointCloudT);  // ICP output point cloud
 
     cout << "Setting up pointclouds..." << endl;
     pcl::console::TicToc time;
@@ -536,13 +690,7 @@ static PyObject * alignTemplateWithSceneICP2DData(PyObject* self, PyObject*args)
     }
     printf("\n");
     int n_point_in_template_cloud = array_dim_ptr_template_cloud[0];
-    for (int i = 0; i < n_point_in_template_cloud; i++) {
-        float * float_ptr_x = (float*) PyArray_GETPTR2(py_array_ptr_template_cloud, i, 0);
-        float * float_ptr_y = (float*) PyArray_GETPTR2(py_array_ptr_template_cloud, i, 1);
-        float * float_prt_z = (float*) PyArray_GETPTR2(py_array_ptr_template_cloud, i, 2);
-        PointT pt = PointT(*float_ptr_x, *float_ptr_y, *float_prt_z);
-        cloud_slc_template->push_back(pt);
-    }
+    convert_py_array_to_pcl_cloud(n_point_in_template_cloud, py_array_ptr_template_cloud, pcl_cloud_slc_template);
     printf("shape of the scene array: \n");
     npy_intp * array_dim_ptr_scene_cloud = PyArray_DIMS(py_array_ptr_scene_cloud);
     for (int i = 0; i < PyArray_NDIM(py_array_ptr_scene_cloud); i++) {
@@ -550,32 +698,26 @@ static PyObject * alignTemplateWithSceneICP2DData(PyObject* self, PyObject*args)
     }
     printf("\n");
     int n_point_in_scene_cloud = array_dim_ptr_scene_cloud[0];
-    for (int i = 0; i < n_point_in_scene_cloud; i++) {
-        float * float_ptr_x = (float*) PyArray_GETPTR2(py_array_ptr_scene_cloud, i, 0);
-        float * float_ptr_y = (float*) PyArray_GETPTR2(py_array_ptr_scene_cloud, i, 1);
-        float * float_prt_z = (float*) PyArray_GETPTR2(py_array_ptr_scene_cloud, i, 2);
-        PointT pt = PointT(*float_ptr_x, *float_ptr_y, *float_prt_z);
-        cloud_scene_not_aligned->push_back(pt);
-    }
+    convert_py_array_to_pcl_cloud(n_point_in_scene_cloud, py_array_ptr_scene_cloud, pcl_cloud_scene_not_aligned);
 
     cout << "Aligning point cloud..." << endl;
-//    cloud_slc_template = pipline_cloud_down_sampling(cloud_slc_template, 0.001f);
-    cloud_slc_template = pipline_cloud_down_sampling(cloud_slc_template, template_voxel_dim);
+//    pcl_cloud_slc_template = pipeline_cloud_down_sampling(pcl_cloud_slc_template, 0.001f);
+    pcl_cloud_slc_template = pipeline_cloud_down_sampling(pcl_cloud_slc_template, template_voxel_dim);
     Eigen::Vector4f template_centroid;
-    pcl::compute3DCentroid(*cloud_slc_template, template_centroid);
+    pcl::compute3DCentroid(*pcl_cloud_slc_template, template_centroid);
 
-    cloud_scene_not_aligned = pipline_cloud_down_sampling(cloud_scene_not_aligned, scene_voxel_dim);
+    pcl_cloud_scene_not_aligned = pipeline_cloud_down_sampling(pcl_cloud_scene_not_aligned, scene_voxel_dim);
     if (n_point_in_scene_cloud > 1000) {
-        cloud_scene_not_aligned = pipline_cloud_remove_out_liers(cloud_scene_not_aligned);
+        pcl_cloud_scene_not_aligned = pipeline_cloud_remove_out_liers(pcl_cloud_scene_not_aligned);
     }
     Eigen::Vector4f scene_centroid;
-    pcl::compute3DCentroid(*cloud_scene_not_aligned, scene_centroid);
+    pcl::compute3DCentroid(*pcl_cloud_scene_not_aligned, scene_centroid);
 
     Eigen::Vector4f scene_to_template_translation = scene_centroid - template_centroid;
     scene_to_template_translation(3) = 1.f;
     Eigen::Matrix4f init_scene_transformation = Eigen::Matrix4f::Identity();
     init_scene_transformation.col(3) = scene_to_template_translation;
-//    pcl::transformPointCloud(*cloud_scene_not_aligned, *cloud_scene_not_aligned, Eigen::Matrix4f(init_scene_transformation.inverse()));
+//    pcl::transformPointCloud(*pcl_cloud_scene_not_aligned, *pcl_cloud_scene_not_aligned, Eigen::Matrix4f(init_scene_transformation.inverse()));
 
 
     Eigen::Matrix3f init_scene_transformation_2d = Eigen::Matrix3f::Identity();
@@ -584,12 +726,12 @@ static PyObject * alignTemplateWithSceneICP2DData(PyObject* self, PyObject*args)
     init_scene_transformation_2d.col(2).head(2) = init_scene_transformation.col(3).head(2);
     cout << "init_scene_tranaformation_2d:"<<endl;
     cout << init_scene_transformation_2d<<endl;
-    DP * ref_ptr = pcl_cloud_to_pm_DataPoints(cloud_slc_template);
-    DP * data_ptr = pcl_cloud_to_pm_DataPoints(cloud_scene_not_aligned);
+    DP * ref_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_slc_template);
+    DP * data_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_scene_not_aligned);
     const DP & ref = *ref_ptr;
     const DP & data = *data_ptr;
-    DP * ref_2d_ptr = pcl_cloud_to_pm_DataPoints_2D_data(cloud_slc_template);
-    DP * data_2d_ptr = pcl_cloud_to_pm_DataPoints_2D_data(cloud_scene_not_aligned);
+    DP * ref_2d_ptr = pcl_cloud_to_pm_DataPoints_2D_data(pcl_cloud_slc_template);
+    DP * data_2d_ptr = pcl_cloud_to_pm_DataPoints_2D_data(pcl_cloud_scene_not_aligned);
     const DP & ref_2d = *ref_2d_ptr;
     const DP & data_2d = *data_2d_ptr;
 
@@ -696,6 +838,7 @@ static PyMethodDef HelloMethods[] =
 {
      {"say_hello", say_hello, METH_VARARGS, "Greet somebody."},
      {"alignTemplateWithSceneICP", alignTemplateWithSceneICP, METH_VARARGS, " align two point clouds"},
+     {"displayTwoPointCloud", displayTwoPointCloud, METH_VARARGS, " display two point clouds"},
      {"alignTemplateWithSceneICP2DData", alignTemplateWithSceneICP2DData, METH_VARARGS, " align two point clouds in x-y plane"},
      {"print_ndarray_info", print_ndarray_info, METH_VARARGS, "print ndarray info"},
      {NULL, NULL, 0, NULL}
