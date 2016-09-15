@@ -65,7 +65,7 @@ DP * pcl_cloud_to_pm_DataPoints_2D_data(PointCloudXYZ::Ptr pcl_cloud) {
     return pm_data_points_ptr;
 }
 
-DP * pcl_cloud_to_pm_DataPoints(PointCloudXYZ::Ptr pcl_cloud) {
+boost::shared_ptr<DP> pcl_cloud_to_pm_DataPoints(PointCloudXYZ::Ptr pcl_cloud) {
     DP::Labels featureLabels;
     featureLabels.push_back(DP::Label("x", 1));
     featureLabels.push_back(DP::Label("y", 1));
@@ -86,7 +86,7 @@ DP * pcl_cloud_to_pm_DataPoints(PointCloudXYZ::Ptr pcl_cloud) {
         descriptors(0, i_point) = 1.f;
         i_point++;
     }
-    DP * pm_data_points_ptr = new PM::DataPoints(features, featureLabels, descriptors, descriptorLabels);
+    boost::shared_ptr<DP> pm_data_points_ptr(new PM::DataPoints(features, featureLabels, descriptors, descriptorLabels));
     return pm_data_points_ptr;
 }
 
@@ -146,8 +146,8 @@ void config_icp_general(PM::ICP & icp, int isForce2D = 0, int isPointToPlane = 1
     icp.transformations.push_back(rigidTransformation);
 
     PM::DataPointsFilter* identityDataPointsFilter = PM::get().DataPointsFilterRegistrar.create("IdentityDataPointsFilter");
-    PM::DataPointsFilter* randomSamplingDataPointsFilter = PM::get().DataPointsFilterRegistrar.create("RandomSamplingDataPointsFilter");
-    PM::DataPointsFilter* samplingSurfaceNormalDataPointsFilter = PM::get().DataPointsFilterRegistrar.create("SamplingSurfaceNormalDataPointsFilter");
+    //PM::DataPointsFilter* randomSamplingDataPointsFilter = PM::get().DataPointsFilterRegistrar.create("RandomSamplingDataPointsFilter");
+    //PM::DataPointsFilter* samplingSurfaceNormalDataPointsFilter = PM::get().DataPointsFilterRegistrar.create("SamplingSurfaceNormalDataPointsFilter");
     PM::DataPointsFilter* surfaceNormalDataPointsFilter = PM::get().DataPointsFilterRegistrar.create("SurfaceNormalDataPointsFilter");
     if (isPointToPlane == 1) {
         if (isForce2D == 1) {
@@ -205,7 +205,7 @@ void config_icp_general(PM::ICP & icp, int isForce2D = 0, int isPointToPlane = 1
     params["baseFileName"] = "performace_stat";
     params["dumpPerfOnExit"] = "1";
     params["dumpStats"] = "1";
-    PM::Inspector* performaceInspector = PM::get().InspectorRegistrar.create("PerformanceInspector", params);
+    //PM::Inspector* performaceInspector = PM::get().InspectorRegistrar.create("PerformanceInspector", params);
     icp.inspector.reset(nullInspector);
 //    icp.inspector.reset(performaceInspector);
     params.clear();
@@ -399,6 +399,7 @@ static PyObject * downsamplePointCloudXYZRGB(PyObject * self, PyObject * args) {
     py_array_ptr_cloud_rgb = (PyArrayObject *)PyArray_FROM_OTF(py_obj_ptr_cloud_rgb, NPY_UINT32, NPY_ARRAY_IN_ARRAY);
     if (py_array_ptr_cloud_xyz == NULL) return NULL;
     if (py_array_ptr_cloud_rgb == NULL) return NULL;
+
     PointCloudXYZRGB::Ptr pcl_cloud_xyzrgb(new PointCloudXYZRGB);  // ICP output point cloudb
     cout << "Setting up pointclouds..." << endl;
     pcl::console::TicToc time;
@@ -426,26 +427,46 @@ static PyObject * downsamplePointCloudXYZRGB(PyObject * self, PyObject * args) {
     int dims[2];
     dims[0] = n_point_in_cloud_xyzrgb_downsampled;
     dims[1] = 3;
-    PyArrayObject * pcl_cloud_xyz_out = (PyArrayObject *) PyArray_FromDims(2,dims, NPY_FLOAT32);
-    int point_xyz_stride = PyArray_STRIDES(pcl_cloud_xyz_out)[0];
-    PyArrayObject * pcl_cloud_rgb_out = (PyArrayObject *) PyArray_FromDims(1,dims, NPY_UINT32);
-    printf("before assignment");
-    int point_rgb_stride = PyArray_STRIDES(pcl_cloud_rgb_out)[0];
-    float * dataOfxyz_out = (float *) PyArray_DATA(pcl_cloud_xyz_out);
-    float * dataOfrgb_out = (float *) PyArray_DATA(pcl_cloud_rgb_out); // fake float32 array
+    PyArrayObject * npy_array_xyz_out = (PyArrayObject *) PyArray_FromDims(2,dims, NPY_FLOAT32);
+    int point_xyz_stride = PyArray_STRIDES(npy_array_xyz_out)[0];
+    PyArrayObject * npy_array_rgb_out = (PyArrayObject *) PyArray_FromDims(1,dims, NPY_UINT32);
+//    printf("before assignment");
+    int point_rgb_stride = PyArray_STRIDES(npy_array_rgb_out)[0];
+    float * dataOfxyz_out = (float *) PyArray_DATA(npy_array_xyz_out);
+    float * dataOfrgb_out = (float *) PyArray_DATA(npy_array_rgb_out); // fake float32 array
     for (int i = 0; i < n_point_in_cloud_xyzrgb_downsampled; i++) {
         dataOfxyz_out[i * point_xyz_stride/sizeof(float) + 0] = pcl_cloud_xyzrbg_downsampled->points[i].x;
         dataOfxyz_out[i * point_xyz_stride/sizeof(float) + 1] = pcl_cloud_xyzrbg_downsampled->points[i].y;
         dataOfxyz_out[i * point_xyz_stride/sizeof(float) + 2] = pcl_cloud_xyzrbg_downsampled->points[i].z;
         dataOfrgb_out[i * point_rgb_stride/sizeof(float) + 0] = pcl_cloud_xyzrbg_downsampled->points[i].rgb;
     }
-    printf("after assignment");
+//    printf("after assignment\n");
     PyObject * result = PyTuple_New(2);
-    PyTuple_SetItem(result, 0, (PyObject*)(pcl_cloud_xyz_out));
-    PyTuple_SetItem(result, 1, (PyObject*)(pcl_cloud_rgb_out));
+    PyTuple_SetItem(result, 0, PyArray_Return(npy_array_xyz_out));
+    PyTuple_SetItem(result, 1, PyArray_Return(npy_array_rgb_out));
+    Py_DecRef(PyArray_Return(py_array_ptr_cloud_xyz));
+    Py_DecRef(PyArray_Return(py_array_ptr_cloud_rgb));
     return result;
-//    return PyArray_Return(pcl_cloud_xyz_out);
 //    Py_RETURN_NONE;
+
+////    Py_DecRef(PyArray_Return(py_array_ptr_cloud_xyz));
+////    PyArray_XDECREF(py_array_ptr_cloud_xyz);
+////    Py_DecRef(PyArray_Return(py_array_ptr_cloud_rgb));
+////    PyArray_XDECREF(py_array_ptr_cloud_rgb);
+////    PyArray_free(py_array_ptr_cloud_rgb);
+//
+////    PyArray_free(py_array_ptr_cloud_xyz);
+//    printf("ref num: %d\n", PyArray_REFCOUNT(py_array_ptr_cloud_xyz));
+//    printf("ref num: %d\n", PyArray_REFCOUNT(py_array_ptr_cloud_rgb));
+//    int dims_debug[2];
+//    dims_debug[0] = 10;
+//    dims_debug[1] = 3;
+//    PyArrayObject * npy_array_xyz_out_debug = (PyArrayObject *) PyArray_FromDims(2,dims_debug, NPY_FLOAT32);
+//    PyArrayObject * npy_array_rgb_out_debug = (PyArrayObject *) PyArray_FromDims(1,dims_debug, NPY_UINT32);
+//    PyObject * result_debug = PyTuple_New(2);
+//    PyTuple_SetItem(result_debug, 0, PyArray_Return(npy_array_xyz_out_debug));
+//    PyTuple_SetItem(result_debug, 1, PyArray_Return(npy_array_rgb_out_debug));
+//    return result_debug;
 }
 
 static PyObject * displayTwoPointCloud(PyObject* self, PyObject*args) {
@@ -525,8 +546,8 @@ static PyObject * displayTwoPointCloud(PyObject* self, PyObject*args) {
     init_scene_transformation.col(3) = scene_to_template_translation;
 //    pcl::transformPointCloud(*pcl_cloud_scene_not_aligned, *pcl_cloud_scene_not_aligned, Eigen::Matrix4f(init_scene_transformation.inverse()));
 
-    DP * pm_ref_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_slc_template);
-    DP * pm_data_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_scene_not_aligned);
+    boost::shared_ptr<DP> pm_ref_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_slc_template);
+    boost::shared_ptr<DP> pm_data_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_scene_not_aligned);
     const DP & ref = *pm_ref_ptr;
     const DP & data = *pm_data_ptr;
 
@@ -551,6 +572,132 @@ static PyObject * displayTwoPointCloud(PyObject* self, PyObject*args) {
 //    scene_to_iiwa(1, 0) = sin(theta);
 //    scene_to_iiwa(1, 1) = cos(theta);
 
+    std::cout << "\nalignment in " << time.toc() << " ms\n" << endl;
+    cout << "template to data transformation:" << endl << Tinverse << endl;
+
+    if (isDebug == 1) {
+        // Transform data to express it in ref
+        DP data_out(data);
+        DP data_in(data);
+        icp.transformations.apply(data_out, T);
+        icp.transformations.apply(data_in, init_scene_transformation.inverse());
+
+        // Safe files to see the results
+        //    ref.save("test_ref.vtk");
+        PointCloudXYZ::Ptr pcl_ref_cloud_ptr = pm_DataPoints_to_pcl_cloud(ref);
+        //    data.save("test_data_in.vtk");
+        PointCloudXYZ::Ptr pcl_data_in_cloud_ptr = pm_DataPoints_to_pcl_cloud(data_in);
+        //    data_out.save("test_data_out.vtk");
+        PointCloudXYZ::Ptr pcl_data_out_cloud_ptr = pm_DataPoints_to_pcl_cloud(data_out);
+        visualize_pcl_point_clouds(pcl_ref_cloud_ptr, pcl_data_out_cloud_ptr, pcl_data_in_cloud_ptr, "gby");
+    } else {
+    }
+//    Tinverse = scene_to_iiwa * Tinverse;
+    int dims[2];
+    dims[0] = 5;
+    dims[1] = 4;
+    PyArrayObject * Tout = (PyArrayObject *) PyArray_FromDims(2,dims, NPY_FLOAT32);
+    float * dataOfTout = (float *) PyArray_DATA(Tout);//Tout->data;
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            dataOfTout[i * PyArray_STRIDES(Tout)[0]/sizeof(float) + j] = Tinverse(i, j);
+        }
+    }
+    float overLap = icp.errorMinimizer->getWeightedPointUsedRatio();
+    PM::ErrorMinimizer::ErrorElements errorElements = icp.errorMinimizer->getErrorElements();
+    dataOfTout[4 * PyArray_STRIDES(Tout)[0]/sizeof(float) + 0] = overLap;
+    dataOfTout[4 * PyArray_STRIDES(Tout)[0]/sizeof(float) + 1] = float(errorElements.averagedMatchingDist2);
+    dataOfTout[4 * PyArray_STRIDES(Tout)[0]/sizeof(float) + 2] = float(errorElements.weightedMatchingDist2);
+    dataOfTout[4 * PyArray_STRIDES(Tout)[0]/sizeof(float) + 3] = float(errorElements.matches.dists.cols()); // number of matches (this one is normalized one with pure matches whose weights are non-zero inside)
+
+    return PyArray_Return(Tout);
+//    Py_RETURN_NONE;
+}
+
+static PyObject * alignTemplateWithSceneICPWithoutMassCentering(PyObject* self, PyObject*args) {
+    PyObject * py_obj_ptr_scene_cloud = NULL;
+    PyObject * py_obj_ptr_init_translation=NULL;
+    PyObject * py_obj_ptr_template_cloud = NULL;
+    PyArrayObject * py_array_ptr_scene_cloud=NULL;
+    PyArrayObject * py_array_ptr_init_translation=NULL;
+    PyArrayObject * py_array_ptr_template_cloud = NULL;
+    const char* slc_template_ply_filename_str_ptr;
+    const char* scene_pcd_filename_str_prt;
+    float template_voxel_dim, scene_voxel_dim;
+    int isForce2D, isPointToPlane, isDebug;
+    if (!PyArg_ParseTuple(args,
+                          "ssOOOffiii",
+                          &slc_template_ply_filename_str_ptr,
+                          &scene_pcd_filename_str_prt,
+                          &py_obj_ptr_scene_cloud,
+                          &py_obj_ptr_init_translation,
+                          &py_obj_ptr_template_cloud,
+                          &template_voxel_dim,
+                          &scene_voxel_dim,
+                          &isForce2D,
+                          &isPointToPlane,
+                          &isDebug))
+        return NULL;
+    py_array_ptr_scene_cloud = (PyArrayObject *)PyArray_FROM_OTF(py_obj_ptr_scene_cloud, NPY_FLOAT32, NPY_ARRAY_IN_ARRAY);
+    if (py_array_ptr_scene_cloud == NULL) return NULL;
+    py_array_ptr_init_translation = (PyArrayObject *)PyArray_FROM_OTF(py_obj_ptr_init_translation, NPY_FLOAT32, NPY_ARRAY_IN_ARRAY);
+    if (py_array_ptr_init_translation == NULL) return NULL;
+    py_array_ptr_template_cloud = (PyArrayObject *)PyArray_FROM_OTF(py_obj_ptr_template_cloud, NPY_FLOAT32, NPY_ARRAY_IN_ARRAY);
+    if (py_array_ptr_template_cloud == NULL) return NULL;
+
+    Py_DecRef(PyArray_Return(py_array_ptr_template_cloud));
+    Py_DecRef(PyArray_Return(py_array_ptr_init_translation));
+    Py_DecRef(PyArray_Return(py_array_ptr_scene_cloud));
+
+    std::string slc_template_ply_filename(slc_template_ply_filename_str_ptr);
+    std::string scene_pcd_filename(scene_pcd_filename_str_prt);
+
+    PointCloudXYZ::Ptr pcl_cloud_slc_template(new PointCloudXYZ);  // Original point cloud
+    PointCloudXYZ::Ptr pcl_cloud_scene_aligned(new PointCloudXYZ);  // Transformed point cloud
+    PointCloudXYZ::Ptr pcl_cloud_scene_not_aligned(new PointCloudXYZ);  // ICP output point cloud
+
+    cout << "Setting up pointclouds..." << endl;
+    pcl::console::TicToc time;
+    time.tic();
+
+    // init data for tamplate and scene
+    printf("shape of the template array: \n");
+    npy_intp * array_dim_ptr_template_cloud = PyArray_DIMS(py_array_ptr_template_cloud);
+    for (int i = 0; i < PyArray_NDIM(py_array_ptr_template_cloud); i++) {
+        printf ("%ld ", array_dim_ptr_template_cloud[i]);
+    }
+    printf("\n");
+    int n_point_in_template_cloud = array_dim_ptr_template_cloud[0];
+    convert_py_array_to_pcl_cloud(n_point_in_template_cloud, py_array_ptr_template_cloud, pcl_cloud_slc_template); // _in, _in, _out
+    printf("Template non nan point: %d\n", pcl_cloud_slc_template->size());
+
+    printf("shape of the scene array: \n");
+    npy_intp * array_dim_ptr_scene_cloud = PyArray_DIMS(py_array_ptr_scene_cloud);
+    for (int i = 0; i < PyArray_NDIM(py_array_ptr_scene_cloud); i++) {
+        printf ("%ld ", array_dim_ptr_scene_cloud[i]);
+    }
+    printf("\n");
+    int n_point_in_scene_cloud = array_dim_ptr_scene_cloud[0];
+    convert_py_array_to_pcl_cloud(n_point_in_scene_cloud, py_array_ptr_scene_cloud, pcl_cloud_scene_not_aligned);
+    printf("Scene non nan point: %d\n", pcl_cloud_scene_not_aligned->size());
+
+    cout << "Aligning point cloud..." << endl;
+    Eigen::Matrix4f init_scene_transformation = Eigen::Matrix4f::Identity();
+
+    boost::shared_ptr<DP> pm_ref_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_slc_template);
+    boost::shared_ptr<DP> pm_data_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_scene_not_aligned);
+    const DP & ref = *pm_ref_ptr;
+    const DP & data = *pm_data_ptr;
+
+    // Create the default ICP algorithm
+    PM::ICP icp;
+    config_icp_general(icp, isForce2D, isPointToPlane);
+
+    // Compute the transformation to express data in ref
+//    PM::TransformationParameters T = icp(data, ref);
+    PM::TransformationParameters T = icp(data, ref, init_scene_transformation.inverse());
+//    icp.inspector->dumpStats(std::cout);
+    PM::TransformationParameters Tinverse = T.inverse();
     std::cout << "\nalignment in " << time.toc() << " ms\n" << endl;
     cout << "template to data transformation:" << endl << Tinverse << endl;
 
@@ -672,8 +819,8 @@ static PyObject * alignTemplateWithSceneICP(PyObject* self, PyObject*args) {
     init_scene_transformation.col(3) = scene_to_template_translation;
 //    pcl::transformPointCloud(*pcl_cloud_scene_not_aligned, *pcl_cloud_scene_not_aligned, Eigen::Matrix4f(init_scene_transformation.inverse()));
 
-    DP * pm_ref_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_slc_template);
-    DP * pm_data_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_scene_not_aligned);
+    boost::shared_ptr<DP> pm_ref_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_slc_template);
+    boost::shared_ptr<DP> pm_data_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_scene_not_aligned);
     const DP & ref = *pm_ref_ptr;
     const DP & data = *pm_data_ptr;
 
@@ -812,8 +959,8 @@ static PyObject * alignTemplateWithSceneICP2DData(PyObject* self, PyObject*args)
     init_scene_transformation_2d.col(2).head(2) = init_scene_transformation.col(3).head(2);
     cout << "init_scene_tranaformation_2d:"<<endl;
     cout << init_scene_transformation_2d<<endl;
-    DP * ref_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_slc_template);
-    DP * data_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_scene_not_aligned);
+    boost::shared_ptr<DP> ref_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_slc_template);
+    boost::shared_ptr<DP> data_ptr = pcl_cloud_to_pm_DataPoints(pcl_cloud_scene_not_aligned);
     const DP & ref = *ref_ptr;
     const DP & data = *data_ptr;
     DP * ref_2d_ptr = pcl_cloud_to_pm_DataPoints_2D_data(pcl_cloud_slc_template);
@@ -924,6 +1071,7 @@ static PyMethodDef HelloMethods[] =
 {
      {"say_hello", say_hello, METH_VARARGS, "Greet somebody."},
      {"alignTemplateWithSceneICP", alignTemplateWithSceneICP, METH_VARARGS, " align two point clouds"},
+     {"alignTemplateWithSceneICPWithoutMassCentering", alignTemplateWithSceneICPWithoutMassCentering, METH_VARARGS, " align two point clouds"},
      {"displayTwoPointCloud", displayTwoPointCloud, METH_VARARGS, " display two point clouds"},
      {"alignTemplateWithSceneICP2DData", alignTemplateWithSceneICP2DData, METH_VARARGS, " align two point clouds in x-y plane"},
      {"downsamplePointCloudXYZRGB", downsamplePointCloudXYZRGB, METH_VARARGS, "Downsample the xyzrgb point cloud"},
