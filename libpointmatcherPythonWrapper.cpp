@@ -696,6 +696,7 @@ static PyObject * alignTemplateWithSceneICPWithoutMassCentering(PyObject* self, 
     // Compute the transformation to express data in ref
 //    PM::TransformationParameters T = icp(data, ref);
     PM::TransformationParameters T = icp(data, ref, init_scene_transformation.inverse());
+//    PM::TransformationParameters T = init_scene_transformation;
 //    icp.inspector->dumpStats(std::cout);
     PM::TransformationParameters Tinverse = T.inverse();
     std::cout << "\nalignment in " << time.toc() << " ms\n" << endl;
