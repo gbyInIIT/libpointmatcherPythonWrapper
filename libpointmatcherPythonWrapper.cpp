@@ -782,7 +782,7 @@ static PyObject * alignTemplateWithSceneICP(PyObject* self, PyObject*args) {
     time.tic();
 
     // init data for tamplate and scene
-    printf("shape of the template array: \n");
+    printf("Shape of the template array: \n");
     npy_intp * array_dim_ptr_template_cloud = PyArray_DIMS(py_array_ptr_template_cloud);
     for (int i = 0; i < PyArray_NDIM(py_array_ptr_template_cloud); i++) {
         printf ("%ld ", array_dim_ptr_template_cloud[i]);
@@ -792,7 +792,7 @@ static PyObject * alignTemplateWithSceneICP(PyObject* self, PyObject*args) {
     convert_py_array_to_pcl_cloud(n_point_in_template_cloud, py_array_ptr_template_cloud, pcl_cloud_slc_template); // _in, _in, _out
     printf("Template non nan point: %d\n", pcl_cloud_slc_template->size());
 
-    printf("shape of the scene array: \n");
+    printf("Shape of the scene array: \n");
     npy_intp * array_dim_ptr_scene_cloud = PyArray_DIMS(py_array_ptr_scene_cloud);
     for (int i = 0; i < PyArray_NDIM(py_array_ptr_scene_cloud); i++) {
         printf ("%ld ", array_dim_ptr_scene_cloud[i]);
@@ -802,15 +802,18 @@ static PyObject * alignTemplateWithSceneICP(PyObject* self, PyObject*args) {
     convert_py_array_to_pcl_cloud(n_point_in_scene_cloud, py_array_ptr_scene_cloud, pcl_cloud_scene_not_aligned);
     printf("Scene non nan point: %d\n", pcl_cloud_scene_not_aligned->size());
 
-    cout << "Aligning point cloud..." << endl;
     pcl_cloud_slc_template = pipeline_cloud_down_sampling(pcl_cloud_slc_template, template_voxel_dim);
+    printf("Template num of points after dowmsampling with voxel dim of %f: %d\n", template_voxel_dim, pcl_cloud_slc_template->size());
     Eigen::Vector4f template_centroid;
     pcl::compute3DCentroid(*pcl_cloud_slc_template, template_centroid);
 
     pcl_cloud_scene_not_aligned = pipeline_cloud_down_sampling(pcl_cloud_scene_not_aligned, scene_voxel_dim);
+    printf("Scene num of points after dowmsampling with voxel dim of %f: %d\n", scene_voxel_dim, pcl_cloud_scene_not_aligned->size());
     if (n_point_in_scene_cloud > 1000) {
         pcl_cloud_scene_not_aligned = pipeline_cloud_remove_out_liers(pcl_cloud_scene_not_aligned);
+        printf("Scene num of points after outlier removal: %d\n", pcl_cloud_scene_not_aligned->size());
     }
+    fflush(stdout);
     Eigen::Vector4f scene_centroid;
     pcl::compute3DCentroid(*pcl_cloud_scene_not_aligned, scene_centroid);
 
@@ -836,6 +839,7 @@ static PyObject * alignTemplateWithSceneICP(PyObject* self, PyObject*args) {
 
     // Compute the transformation to express data in ref
 //    PM::TransformationParameters T = icp(data, ref);
+    printf("Aligning the two clouds...\n");
     PM::TransformationParameters T = icp(data, ref, init_scene_transformation.inverse());
 //    icp.inspector->dumpStats(std::cout);
     PM::TransformationParameters Tinverse = T.inverse();
@@ -846,8 +850,9 @@ static PyObject * alignTemplateWithSceneICP(PyObject* self, PyObject*args) {
 //    scene_to_iiwa(1, 0) = sin(theta);
 //    scene_to_iiwa(1, 1) = cos(theta);
 
-    std::cout << "\nalignment in " << time.toc() << " ms\n" << endl;
-    cout << "template to data transformation:" << endl << Tinverse << endl;
+    printf("\nalignment in %f ms.\n", time.toc());
+    fflush(stdout);
+    cout << "Template to scene transformation:" << endl << Tinverse << endl;
 
     if (isDebug == 1) {
         // Transform data to express it in ref
